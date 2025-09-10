@@ -18,13 +18,81 @@ type DayStats struct {
 
 type StatsFile map[string]DayStats
 
-func WriteStats(results map[string]int, outputPath string) error {
+// getDataDir returns the XDG data directory for verkounter
+func getDataDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Check for XDG_DATA_HOME environment variable
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(homeDir, ".local", "share")
+	}
+
+	verkounterDir := filepath.Join(dataHome, "verkounter")
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(verkounterDir, 0755); err != nil {
+		return "", err
+	}
+
+	return verkounterDir, nil
+}
+
+// migrateOldStats migrates stats files from ~/Documents to XDG data directory
+func migrateOldStats() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 
-	statsFilePath := filepath.Join(homeDir, "Documents", "verkount_stats.yaml")
+	dataDir, err := getDataDir()
+	if err != nil {
+		return err
+	}
+
+	// Check for old main stats file
+	oldStatsPath := filepath.Join(homeDir, "Documents", "verkount_stats.yaml")
+	newStatsPath := filepath.Join(dataDir, "verkount_stats.yaml")
+
+	if _, err := os.Stat(oldStatsPath); err == nil {
+		// Old file exists
+		if _, err := os.Stat(newStatsPath); os.IsNotExist(err) {
+			// New file doesn't exist, migrate
+			fmt.Printf("Migrating stats from %s to %s\n", oldStatsPath, newStatsPath)
+			if err := os.Rename(oldStatsPath, newStatsPath); err != nil {
+				// If rename fails (e.g., cross-device), copy and delete
+				data, readErr := os.ReadFile(oldStatsPath)
+				if readErr != nil {
+					return readErr
+				}
+				if writeErr := os.WriteFile(newStatsPath, data, 0644); writeErr != nil {
+					return writeErr
+				}
+				if removeErr := os.Remove(oldStatsPath); removeErr != nil {
+					fmt.Printf("Warning: Could not remove old stats file: %v\n", removeErr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func WriteStats(results map[string]int, outputPath string) error {
+	// First, try to migrate old stats if they exist
+	if err := migrateOldStats(); err != nil {
+		fmt.Printf("Warning: Could not migrate old stats: %v\n", err)
+	}
+
+	dataDir, err := getDataDir()
+	if err != nil {
+		return err
+	}
+
+	statsFilePath := filepath.Join(dataDir, "verkount_stats.yaml")
 
 	existingStats := make(StatsFile)
 
@@ -73,9 +141,55 @@ func WriteStats(results map[string]int, outputPath string) error {
 	return os.WriteFile(statsFilePath, updatedData, 0644)
 }
 
-// WriteSeriesStats writes stats for each series to a YAML file in the series folder
-func WriteSeriesStats(seriesResults map[string]map[string]int, documentsPath string) error {
+// migrateSeriesStats migrates series stats from Documents folders to XDG data directory
+func migrateSeriesStats(seriesName string, documentsPath string) error {
+	dataDir, err := getDataDir()
+	if err != nil {
+		return err
+	}
+
+	seriesDir := filepath.Join(dataDir, "series")
+	if err := os.MkdirAll(seriesDir, 0755); err != nil {
+		return err
+	}
+
+	oldStatsPath := filepath.Join(documentsPath, seriesName, "verkount_series_stats.yaml")
+	newStatsPath := filepath.Join(seriesDir, seriesName+"_stats.yaml")
+
+	if _, err := os.Stat(oldStatsPath); err == nil {
+		// Old file exists
+		if _, err := os.Stat(newStatsPath); os.IsNotExist(err) {
+			// New file doesn't exist, migrate
+			fmt.Printf("Migrating series stats from %s to %s\n", oldStatsPath, newStatsPath)
+			data, readErr := os.ReadFile(oldStatsPath)
+			if readErr != nil {
+				return readErr
+			}
+			if writeErr := os.WriteFile(newStatsPath, data, 0644); writeErr != nil {
+				return writeErr
+			}
+			if removeErr := os.Remove(oldStatsPath); removeErr != nil {
+				fmt.Printf("Warning: Could not remove old series stats file: %v\n", removeErr)
+			}
+		}
+	}
+
+	return nil
+}
+
+// WriteSeriesStats writes stats for each series to a YAML file in the XDG data directory
+func WriteSeriesStats(seriesResults map[string]map[string]int, scanPath string) error {
 	dateKey := time.Now().Format("2006-01-02")
+
+	dataDir, err := getDataDir()
+	if err != nil {
+		return err
+	}
+
+	seriesDir := filepath.Join(dataDir, "series")
+	if err := os.MkdirAll(seriesDir, 0755); err != nil {
+		return err
+	}
 
 	for seriesName, projects := range seriesResults {
 		if seriesName == "" {
@@ -83,8 +197,16 @@ func WriteSeriesStats(seriesResults map[string]map[string]int, documentsPath str
 			continue
 		}
 
-		seriesPath := filepath.Join(documentsPath, seriesName)
-		statsFilePath := filepath.Join(seriesPath, "verkount_series_stats.yaml")
+		// Try to migrate old series stats if they exist (only if scanning Documents)
+		homeDir, _ := os.UserHomeDir()
+		documentsPath := filepath.Join(homeDir, "Documents")
+		if scanPath == documentsPath {
+			if err := migrateSeriesStats(seriesName, documentsPath); err != nil {
+				fmt.Printf("Warning: Could not migrate series stats for %s: %v\n", seriesName, err)
+			}
+		}
+
+		statsFilePath := filepath.Join(seriesDir, seriesName+"_stats.yaml")
 
 		// Read existing stats if file exists
 		existingStats := make(StatsFile)

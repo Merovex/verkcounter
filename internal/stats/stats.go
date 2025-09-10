@@ -18,9 +18,31 @@ type DayStats struct {
 
 type StatsFile map[string]DayStats
 
-// LoadStats loads the verkount_stats.yaml file
+// getDataDir returns the XDG data directory for verkounter
+func getDataDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Check for XDG_DATA_HOME environment variable
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(homeDir, ".local", "share")
+	}
+
+	verkounterDir := filepath.Join(dataHome, "verkounter")
+	return verkounterDir, nil
+}
+
+// LoadStats loads the verkount_stats.yaml file from XDG data directory
 func LoadStats(documentsPath string) (StatsFile, error) {
-	statsFilePath := filepath.Join(documentsPath, "verkount_stats.yaml")
+	dataDir, err := getDataDir()
+	if err != nil {
+		return nil, fmt.Errorf("could not get data directory: %v", err)
+	}
+
+	statsFilePath := filepath.Join(dataDir, "verkount_stats.yaml")
 
 	data, err := os.ReadFile(statsFilePath)
 	if err != nil {
@@ -43,7 +65,7 @@ func CalculateStats(stats StatsFile) {
 	// Calculate daily deltas (words actually written each day)
 	dailyDeltas := calculateDailyDeltas(stats)
 
-	fmt.Println("\n=== Writing Statistics ===\n")
+	fmt.Print("\n=== Writing Statistics ===\n\n")
 
 	// Today's stats
 	if todayDelta, exists := dailyDeltas[today]; exists {
@@ -51,7 +73,8 @@ func CalculateStats(stats StatsFile) {
 		fmt.Printf("  Words written: %d\n\n", todayDelta)
 	} else {
 		fmt.Printf("Today (%s):\n", today)
-		fmt.Println("  No words written yet\n")
+		fmt.Println("  No words written yet")
+		fmt.Println()
 	}
 
 	// This week's stats (Monday to Sunday)
@@ -68,7 +91,7 @@ func CalculateStats(stats StatsFile) {
 	if weekStats.daysWithWriting > 0 {
 		fmt.Printf("  Daily average: %d words\n\n", weekStats.total/daysInWeek)
 	} else {
-		fmt.Println()
+		fmt.Print("\n")
 	}
 
 	// Past 30 days
@@ -81,7 +104,7 @@ func CalculateStats(stats StatsFile) {
 	if thirtyDayStats.daysWithWriting > 0 {
 		fmt.Printf("  Daily average: %d words\n\n", thirtyDayStats.total/30)
 	} else {
-		fmt.Println()
+		fmt.Print("\n")
 	}
 
 	// Year to date
@@ -95,7 +118,7 @@ func CalculateStats(stats StatsFile) {
 	if ytdStats.daysWithWriting > 0 {
 		fmt.Printf("  Daily average: %d words\n\n", ytdStats.total/daysInYear)
 	} else {
-		fmt.Println()
+		fmt.Print("\n")
 	}
 
 	// Past 365 days
@@ -108,7 +131,7 @@ func CalculateStats(stats StatsFile) {
 	if yearStats.daysWithWriting > 0 {
 		fmt.Printf("  Daily average: %d words\n\n", yearStats.total/365)
 	} else {
-		fmt.Println()
+		fmt.Print("\n")
 	}
 
 	// Most productive days

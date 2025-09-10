@@ -44,7 +44,15 @@ touch ~/Documents/blog-posts/.verkount
 Run Verkounter to update word counts:
 
 ```bash
+# Scan default location (~/Documents)
 ./verkounter
+
+# Scan current directory
+./verkounter .
+
+# Scan specific directory
+./verkounter ~/Writing
+./verkounter /path/to/projects
 ```
 
 ### View Statistics
@@ -65,10 +73,10 @@ This shows:
 
 ## Project Structure
 
-Verkounter expects your writing projects to be organized under `~/Documents`:
+Verkounter can scan any directory for projects marked with `.verkount` files:
 
 ```
-~/Documents/
+any-directory/
 ├── Series-Name/           # Optional series folder
 │   ├── Project-1/         # Individual project
 │   │   ├── .verkount      # Marker file
@@ -81,11 +89,21 @@ Verkounter expects your writing projects to be organized under `~/Documents`:
     └── *.md
 ```
 
-## Output Files
+By default, Verkounter scans `~/Documents`, but you can specify any directory as shown in the usage examples.
+
+## Data Storage
+
+Verkounter follows the XDG Base Directory Specification for storing data:
+
+- **Data Directory**: `~/.local/share/verkounter/`
+  - Main statistics: `~/.local/share/verkounter/verkount_stats.yaml`
+  - Series statistics: `~/.local/share/verkounter/series/<series-name>_stats.yaml`
+
+On first run, Verkounter will automatically migrate existing stats files from `~/Documents` to the new location.
 
 ### Main Statistics File
 
-`~/Documents/verkount_stats.yaml` - Contains all projects' daily word counts:
+`~/.local/share/verkounter/verkount_stats.yaml` - Contains all projects' daily word counts:
 
 ```yaml
 2025-08-17:
@@ -99,7 +117,7 @@ Verkounter expects your writing projects to be organized under `~/Documents`:
 
 ### Series Statistics Files
 
-For each series folder, creates `verkount_series_stats.yaml`:
+For each series, creates `~/.local/share/verkounter/series/<series-name>_stats.yaml`:
 
 ```yaml
 2025-08-17:
@@ -112,11 +130,12 @@ For each series folder, creates `verkount_series_stats.yaml`:
 
 ## How It Works
 
-1. **Scanning**: Recursively scans `~/Documents` for folders containing `.verkount` marker files
+1. **Scanning**: Recursively scans the specified directory (default: `~/Documents`) for folders containing `.verkount` marker files
 2. **Processing**: Reads all Markdown files in marked folders, stripping YAML frontmatter
 3. **Counting**: Calculates word count using 6 characters = 1 word approximation
 4. **Delta Calculation**: Compares with previous entry to determine words actually written
-5. **Output**: Updates YAML files only when counts change, preserving writing history
+5. **Output**: Updates YAML files in `~/.local/share/verkounter/` only when counts change, preserving writing history
+6. **Migration**: Automatically migrates existing stats from `~/Documents` to the XDG data directory on first run
 
 ## Architecture
 
@@ -150,9 +169,9 @@ go build -o verkounter cmd/verkounter/main.go
 ## Configuration
 
 Currently, Verkounter uses sensible defaults:
-- Scans `~/Documents` directory
+- Default scan directory: `~/Documents` (can be overridden with positional argument)
+- Stores data in `~/.local/share/verkounter/` (XDG data directory)
 - Uses 6 characters per word ratio
-- Creates output files in `~/Documents`
 - Processes up to 4 folders concurrently
 
 ## Contributing

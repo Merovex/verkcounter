@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/bwilson/verkounter/internal/counter"
@@ -22,26 +23,95 @@ type WorkResult struct {
 	Error      error
 }
 
+func printUsage() {
+	fmt.Println(`Verkounter - A fast word counting tool that tracks writing progress across multiple projects
+by scanning directories for .verkount marker files and processing Markdown content.
+
+Usage:
+  verkounter [directory]     Scan directory for .verkount projects (default: ~/Documents)
+  verkounter --stats         Display writing statistics
+  verkounter --help          Show this help message
+
+Arguments:
+  directory                  Directory to scan (optional, defaults to ~/Documents)
+                            Examples: . (current dir), ~/Writing, /path/to/projects
+
+Options:
+  --stats                    Display detailed writing statistics
+  --help, -h                 Show help information
+
+Output files:
+  Stats are stored in ~/.local/share/verkounter/
+  - verkount_stats.yaml      Main statistics file with daily word counts
+  - series/*_stats.yaml      Per-series statistics files
+
+For more information, see: https://github.com/bwilson/verkounter`)
+}
+
 func main() {
 	// Parse command line flags
 	statsFlag := flag.Bool("stats", false, "Display writing statistics")
+	helpFlag := flag.Bool("help", false, "Show help information")
+	flag.BoolVar(helpFlag, "h", false, "Show help information (shorthand)")
+	flag.Usage = printUsage
 	flag.Parse()
+
+	// Show help if requested
+	if *helpFlag {
+		printUsage()
+		return
+	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("Error getting home directory: %v", err)
 	}
 
-	documentsPath := filepath.Join(homeDir, "Documents")
-
 	// If --stats flag is provided, show statistics and exit
 	if *statsFlag {
-		showStatistics(documentsPath)
+		showStatistics("")
 		return
 	}
 
-	fmt.Println("Scanning for .verkount folders...")
-	folders, err := scanner.ScanForVerkountFolders(documentsPath)
+	// Determine scan path from arguments or use default
+	scanPath := filepath.Join(homeDir, "Documents") // default
+	args := flag.Args()
+	if len(args) > 0 {
+		scanPath = args[0]
+		
+		// Handle current directory
+		if scanPath == "." {
+			scanPath, err = os.Getwd()
+			if err != nil {
+				log.Fatalf("Error getting current directory: %v", err)
+			}
+		} else if scanPath == ".." {
+			// Handle parent directory
+			cwd, err := os.Getwd()
+			if err != nil {
+				log.Fatalf("Error getting current directory: %v", err)
+			}
+			scanPath = filepath.Dir(cwd)
+		} else if strings.HasPrefix(scanPath, "~/") {
+			// Handle tilde expansion
+			scanPath = filepath.Join(homeDir, scanPath[2:])
+		} else if !filepath.IsAbs(scanPath) {
+			// Handle relative paths
+			cwd, err := os.Getwd()
+			if err != nil {
+				log.Fatalf("Error getting current directory: %v", err)
+			}
+			scanPath = filepath.Join(cwd, scanPath)
+		}
+	}
+
+	// Verify the scan path exists
+	if _, err := os.Stat(scanPath); os.IsNotExist(err) {
+		log.Fatalf("Path does not exist: %s", scanPath)
+	}
+
+	fmt.Printf("Scanning %s for .verkount folders...\n", scanPath)
+	folders, err := scanner.ScanForVerkountFolders(scanPath)
 	if err != nil {
 		log.Fatalf("Error scanning folders: %v", err)
 	}
@@ -107,13 +177,13 @@ func main() {
 	}
 
 	// Write overall stats
-	err = output.WriteStats(results, documentsPath)
+	err = output.WriteStats(results, scanPath)
 	if err != nil {
 		log.Fatalf("Error writing stats: %v", err)
 	}
 
 	// Write series-specific stats
-	err = output.WriteSeriesStats(seriesResults, documentsPath)
+	err = output.WriteSeriesStats(seriesResults, scanPath)
 	if err != nil {
 		log.Fatalf("Error writing series stats: %v", err)
 	}
@@ -123,7 +193,20 @@ func main() {
 		total += count
 	}
 
-	fmt.Printf("\nStats saved to ~/Documents/verkount_stats.yaml\n")
+	// Determine XDG data directory for display message
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = "~/.local/share"
+	} else {
+		// Make it relative to home for display
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			if rel, err := filepath.Rel(homeDir, dataHome); err == nil {
+				dataHome = "~/" + rel
+			}
+		}
+	}
+	
+	fmt.Printf("\nStats saved to %s/verkounter/verkount_stats.yaml\n", dataHome)
 	fmt.Printf("Total words: %d\n", total)
 	if errorCount > 0 {
 		fmt.Printf("Errors encountered: %d\n", errorCount)
@@ -155,9 +238,9 @@ func worker(folders <-chan scanner.VerkountFolder, results chan<- WorkResult, wg
 	}
 }
 
-func showStatistics(documentsPath string) {
-	// Load the stats file
-	statsData, err := stats.LoadStats(documentsPath)
+func showStatistics(path string) {
+	// Load the stats file from XDG data directory
+	statsData, err := stats.LoadStats(path)
 	if err != nil {
 		log.Fatalf("Error loading stats: %v", err)
 	}
